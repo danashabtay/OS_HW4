@@ -259,8 +259,8 @@ void *srealloc(void *oldp, size_t size)
     {
         return NULL;
     }
-    
-    memcpy(ptr, oldp, size);
+
+    memmove(ptr, oldp, size);
     sfree(oldp);
     return ptr;
 }
