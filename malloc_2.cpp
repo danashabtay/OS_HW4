@@ -38,7 +38,7 @@ MallocMetadata *MMDBlockList::get_metadata(void *ptr)
 
 void *MMDBlockList::allocateBlock(size_t size)
 {
-    size_t allocation_size = size + sizeof(META_SIZE);
+    size_t allocation_size = size + META_SIZE;
     MallocMetadata *curr_block = block_list;
 
     while (curr_block != NULL)
