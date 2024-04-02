@@ -26,7 +26,6 @@ class MMDBlockList
 
 public:
     MMDBlockList() : block_list(NULL){};
-    MMDBlockList();
     MallocMetadata *get_metadata(void *ptr);
     void freeBlock(void *ptr);
     void *allocateBlock(size_t size);
