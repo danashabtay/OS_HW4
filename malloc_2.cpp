@@ -67,7 +67,7 @@ void *MMDBlockList::allocateBlock(size_t size)
     new_block->prev = NULL;
 
     // insert new block:
-    MallocMetadata *curr_block = block_list;
+    curr_block = block_list;
     MallocMetadata *prev_block = NULL;
     while (curr_block)
     {
