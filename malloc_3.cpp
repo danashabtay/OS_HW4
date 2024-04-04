@@ -130,14 +130,20 @@ void *allocateBlock(size_t size)
     else
     {
         // Check if it's the first call to malloc
-        
+
         if (first_malloc_call)
         {
+            void *curr_ptr = sbrk(0);
+            intptr_t res = curr_ptr % (32 * 128 * 1024);
+            intptr_t inc = (32 * 128 * 1024) - res;
+            sbrk(inc + INITIAL_BLOCKS * MAX_BLOCK_SIZE);
+            void *starting_addr = curr_ptr + inc;
+
+            /* 
             // Call sbrk() to allocate memory for the initial 32 free blocks of size 128kb
             void *initial_blocks = sbrk(INITIAL_BLOCKS * MAX_BLOCK_SIZE);
             intptr_t adjustment_size = 0;
-            if (initial_blocks != FAILURE)
-            {
+
                 // Calculate the alignment adjustment
                 intptr_t alignment_adjustment = (intptr_t)initial_blocks % (32 * 128 * 1024);
 
@@ -153,26 +159,28 @@ void *allocateBlock(size_t size)
                     {
                         return NULL;
                     }
+
                 }
-                // initialize array:
-                for (int i = 0; i <= MAX_ORDER; ++i)
-                {
-                    arr[i] = MMDBlockList();
-                }
-                // Initialize metadata for each block and add to the free lists
-                for (int i = 0; i < INITIAL_BLOCKS; ++i)
-                {
-                    // Initialize metadata for the current block
-                    MallocMetadata *metadata = (MallocMetadata *)((char *)initial_blocks + adjustment_size + (i * MAX_BLOCK_SIZE));
-                    metadata->size = MAX_BLOCK_SIZE - META_SIZE;
-                    metadata->is_free = true;
-                    metadata->is_mmaped = false;
-                    metadata->next = arr[MAX_ORDER].block_list;
-                    metadata->prev = NULL;
-                    if (arr[MAX_ORDER].block_list != NULL)
-                        arr[MAX_ORDER].block_list->prev = metadata;
-                    arr[MAX_ORDER].block_list = metadata;
-                }
+            */
+
+            // initialize array:
+            for (int i = 0; i <= MAX_ORDER; ++i)
+            {
+                arr[i] = MMDBlockList();
+            }
+            // Initialize metadata for each block and add to the free lists
+            for (int i = 0; i < INITIAL_BLOCKS; ++i)
+            {
+                // Initialize metadata for the current block
+                MallocMetadata *metadata = (MallocMetadata *)((char *)starting_addr + (i * MAX_BLOCK_SIZE));
+                metadata->size = MAX_BLOCK_SIZE - META_SIZE;
+                metadata->is_free = true;
+                metadata->is_mmaped = false;
+                metadata->next = arr[MAX_ORDER].block_list;
+                metadata->prev = NULL;
+                if (arr[MAX_ORDER].block_list != NULL)
+                    arr[MAX_ORDER].block_list->prev = metadata;
+                arr[MAX_ORDER].block_list = metadata;
             }
 
             first_malloc_call = false;
@@ -388,13 +396,13 @@ void splitBlockIfNeeded(MallocMetadata *metadata, size_t requested_size)
         --order;
 
         // Update the array of linked lists
-       // MallocMetadata *prev_ptr = NULL;
+        // MallocMetadata *prev_ptr = NULL;
         // MallocMetadata *curr_ptr = arr[order].block_list;
 
-        buddy->next=arr[order].block_list;
-        arr[order].block_list->prev=buddy;
-        metadata->prev=NULL;
-        arr[order].block_list=metadata;
+        buddy->next = arr[order].block_list;
+        arr[order].block_list->prev = buddy;
+        metadata->prev = NULL;
+        arr[order].block_list = metadata;
 
         // while (curr_ptr && curr_ptr != metadata)
         // {
@@ -434,16 +442,12 @@ void *smalloc(size_t size)
     {
         return NULL;
     }
-
     // Allocate a block if no suitable block is available
     void *allocatedBlock = allocateBlock(size);
     if (allocatedBlock == NULL)
     {
         return NULL;
     }
-    
-   
-
     // Check if the allocated block can be split
     MallocMetadata *metadata = get_metadata(allocatedBlock);
     splitBlockIfNeeded(metadata, size);
@@ -532,8 +536,8 @@ void *srealloc(void *oldp, size_t size)
     }
 }
 
-
-int main() {
+int main()
+{
     // Write C++ code here
     smalloc(40);
 
