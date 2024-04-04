@@ -1,6 +1,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <cmath>
 
 typedef struct MallocMetadata
 {
@@ -26,9 +27,9 @@ public:
     MMDBlockList() : block_list(NULL){};
 };
 
-
-MMDBlockList *arr[MAX_ORDER];
+MMDBlockList arr[MAX_ORDER + 1];
 MMDBlockList mmap_list = MMDBlockList(); // List for mmaped blocks
+bool first_malloc_call = true;
 
 // implement block list //
 
@@ -36,13 +37,15 @@ void mergeBuddyBlocks(MallocMetadata *metadata)
 {
     size_t block_size = metadata->size + META_SIZE;
     int order = 0;
+    unsigned power_of_2 = pow(2, order);
     // Find the order of this metadata
-    while ((1 << order) * MIN_BLOCK_SIZE < block_size)
+    while (power_of_2 * MIN_BLOCK_SIZE < block_size)
     {
         ++order;
+        power_of_2 = pow(2, order);
     }
 
-    while (order < MAX_ORDER - 1)
+    while (order < MAX_ORDER)
     {
         // Calculate the address of the buddy block
         intptr_t buddy_address = ((intptr_t)metadata) ^ block_size;
@@ -58,7 +61,7 @@ void mergeBuddyBlocks(MallocMetadata *metadata)
             }
             else
             {
-                arr[order]->block_list = buddy->next;
+                arr[order].block_list = buddy->next;
             }
             if (buddy->next != NULL)
             {
@@ -72,15 +75,15 @@ void mergeBuddyBlocks(MallocMetadata *metadata)
             ++order;
 
             // Add the merged block to the linked list of the higher order if order has increased
-            if (order < MAX_ORDER - 1)
+            if (order < MAX_ORDER)
             {
-                metadata->next = arr[order]->block_list;
+                metadata->next = arr[order].block_list;
                 metadata->prev = NULL;
-                if (arr[order]->block_list != NULL)
+                if (arr[order].block_list != NULL)
                 {
-                    arr[order]->block_list->prev = metadata;
+                    arr[order].block_list->prev = metadata;
                 }
-                arr[order]->block_list = metadata;
+                arr[order].block_list = metadata;
             }
 
             // Return the merged block
@@ -113,7 +116,7 @@ void *allocateBlock(size_t size)
         MallocMetadata *metadata = (MallocMetadata *)mem;
         metadata->size = size;
         metadata->is_free = false;
-        metadata->is_mmaped = true;             // Mark as mmaped block
+        metadata->is_mmaped = true;            // Mark as mmaped block
         metadata->next = mmap_list.block_list; // Add to mmap list
         metadata->prev = NULL;
         // update mmap_list
@@ -127,11 +130,12 @@ void *allocateBlock(size_t size)
     else
     {
         // Check if it's the first call to malloc
-        static bool first_malloc_call = true;
+        
         if (first_malloc_call)
         {
             // Call sbrk() to allocate memory for the initial 32 free blocks of size 128kb
             void *initial_blocks = sbrk(INITIAL_BLOCKS * MAX_BLOCK_SIZE);
+            intptr_t adjustment_size = 0;
             if (initial_blocks != FAILURE)
             {
                 // Calculate the alignment adjustment
@@ -141,7 +145,7 @@ void *allocateBlock(size_t size)
                 if (alignment_adjustment != 0)
                 {
                     // Calculate the size of the adjustment
-                    intptr_t adjustment_size = (32 * 128 * 1024) - alignment_adjustment;
+                    adjustment_size = (32 * 128 * 1024) - alignment_adjustment;
 
                     // Increment the program break to align the memory
                     void *aligned_ptr = sbrk(adjustment_size);
@@ -150,20 +154,24 @@ void *allocateBlock(size_t size)
                         return NULL;
                     }
                 }
-
+                // initialize array:
+                for (int i = 0; i <= MAX_ORDER; ++i)
+                {
+                    arr[i] = MMDBlockList();
+                }
                 // Initialize metadata for each block and add to the free lists
                 for (int i = 0; i < INITIAL_BLOCKS; ++i)
                 {
                     // Initialize metadata for the current block
-                    MallocMetadata *metadata = (MallocMetadata *)((char *)initial_blocks + i * MAX_BLOCK_SIZE);
+                    MallocMetadata *metadata = (MallocMetadata *)((char *)initial_blocks + adjustment_size + (i * MAX_BLOCK_SIZE));
                     metadata->size = MAX_BLOCK_SIZE - META_SIZE;
                     metadata->is_free = true;
                     metadata->is_mmaped = false;
-                    metadata->next = arr[MAX_ORDER - 1]->block_list;
+                    metadata->next = arr[MAX_ORDER].block_list;
                     metadata->prev = NULL;
-                    if (arr[MAX_ORDER - 1]->block_list != NULL)
-                        arr[MAX_ORDER - 1]->block_list->prev = metadata;
-                    arr[MAX_ORDER - 1]->block_list = metadata;
+                    if (arr[MAX_ORDER].block_list != NULL)
+                        arr[MAX_ORDER].block_list->prev = metadata;
+                    arr[MAX_ORDER].block_list = metadata;
                 }
             }
 
@@ -172,7 +180,7 @@ void *allocateBlock(size_t size)
 
         // Calculate the order of the block based on its size
         int order = 0;
-        size_t block_size = MAX_BLOCK_SIZE;
+        size_t block_size = MIN_BLOCK_SIZE;
         while (block_size < size + META_SIZE)
         {
             block_size <<= 1; // Double the size
@@ -180,9 +188,9 @@ void *allocateBlock(size_t size)
         }
 
         // Search for a free block in the appropriate order
-        for (int i = order; i < MAX_ORDER; ++i)
+        for (int i = order; i <= MAX_ORDER; ++i)
         {
-            MallocMetadata *curr_block = arr[i]->block_list;
+            MallocMetadata *curr_block = arr[i].block_list;
             while (curr_block)
             {
                 if (curr_block->is_free)
@@ -238,21 +246,13 @@ size_t numFreeBlocks()
     // Count free blocks in the buddy allocator
     for (int i = 0; i < MAX_ORDER; ++i)
     {
-        MallocMetadata *block = arr[i]->block_list;
+        MallocMetadata *block = arr[i].block_list;
         while (block)
         {
-            if (block->is_free)
+            if (block->is_free && !block->is_mmaped) // Exclude mmaped blocks
                 count++;
             block = block->next;
         }
-    }
-    // Count free blocks in the mmap list
-    MallocMetadata *block = mmap_list.block_list;
-    while (block)
-    {
-        if (block->is_free)
-            count++;
-        block = block->next;
     }
     return count;
 }
@@ -263,21 +263,13 @@ size_t numFreeBytes()
     // Sum up the sizes of free blocks in the buddy allocator
     for (int i = 0; i < MAX_ORDER; ++i)
     {
-        MallocMetadata *block = arr[i]->block_list;
+        MallocMetadata *block = arr[i].block_list;
         while (block)
         {
-            if (block->is_free)
+            if (block->is_free && !block->is_mmaped) // Exclude mmaped blocks
                 free_bytes += block->size;
             block = block->next;
         }
-    }
-    // Sum up the sizes of free blocks in the mmap list
-    MallocMetadata *block = mmap_list.block_list;
-    while (block)
-    {
-        if (block->is_free)
-            free_bytes += block->size;
-        block = block->next;
     }
     return free_bytes;
 }
@@ -288,7 +280,7 @@ size_t numTotalBlocks()
     // Count all blocks in the buddy allocator
     for (int i = 0; i < MAX_ORDER; ++i)
     {
-        MallocMetadata *block = arr[i]->block_list;
+        MallocMetadata *block = arr[i].block_list;
         while (block)
         {
             count++;
@@ -311,7 +303,7 @@ size_t numTotalBytes()
     // Sum up the sizes of all blocks in the buddy allocator
     for (int i = 0; i < MAX_ORDER; ++i)
     {
-        MallocMetadata *block = arr[i]->block_list;
+        MallocMetadata *block = arr[i].block_list;
         while (block)
         {
             total_bytes += block->size;
@@ -364,58 +356,71 @@ void splitBlockIfNeeded(MallocMetadata *metadata, size_t requested_size)
 {
     size_t block_size = metadata->size + META_SIZE;
     int order = 0;
-    while ((1 << order) * MIN_BLOCK_SIZE < block_size)
+    unsigned power_of_2 = pow(2, order);
+    // Find the order of this metadata
+    while (power_of_2 * MIN_BLOCK_SIZE < block_size)
     {
         ++order;
+        power_of_2 = pow(2, order);
     }
 
     while (order > 0 && block_size >= 2 * (requested_size + META_SIZE))
     {
         // Split the block into two buddies
         block_size >>= 1;
-        MallocMetadata *buddy = (MallocMetadata *)((char *)metadata + block_size);
+        MallocMetadata *buddy = (MallocMetadata *)((char *)(metadata + block_size));
         buddy->size = block_size - META_SIZE;
+        metadata->size = block_size - META_SIZE;
         buddy->is_free = true;
         buddy->is_mmaped = metadata->is_mmaped; // Set buddy's mmap status
-        buddy->prev = metadata;
-        buddy->next = metadata->next;
-        if (metadata->next != NULL)
-        {
-            metadata->next->prev = buddy;
-        }
+        // buddy->next = metadata->next;
+        // if (metadata->next != NULL)
+        // {
+        //     metadata->next->prev = buddy;
+        // }
+        metadata->next->prev = metadata->prev;
+        metadata->prev->next = metadata->next;
+
         metadata->next = buddy;
+        buddy->prev = metadata;
 
         // Update the order
         --order;
 
         // Update the array of linked lists
-        MallocMetadata *prev_ptr = NULL;
-        MallocMetadata *curr_ptr = arr[order]->block_list;
-        while (curr_ptr && curr_ptr != metadata)
-        {
-            prev_ptr = curr_ptr;
-            curr_ptr = curr_ptr->next;
-        }
-        if (curr_ptr == metadata)
-        {
-            if (prev_ptr)
-            {
-                prev_ptr->next = buddy;
-            }
-            else
-            {
-                arr[order]->block_list = buddy;
-            }
-            buddy->prev = prev_ptr;
-            buddy->next = curr_ptr->next;
-            if (curr_ptr->next != NULL)
-            {
-                curr_ptr->next->prev = buddy;
-            }
-            curr_ptr->next = NULL; // Disconnect the current block from the list
-        }
+       // MallocMetadata *prev_ptr = NULL;
+        // MallocMetadata *curr_ptr = arr[order].block_list;
 
-        metadata = buddy;
+        buddy->next=arr[order].block_list;
+        arr[order].block_list->prev=buddy;
+        metadata->prev=NULL;
+        arr[order].block_list=metadata;
+
+        // while (curr_ptr && curr_ptr != metadata)
+        // {
+        //     prev_ptr = curr_ptr;
+        //     curr_ptr = curr_ptr->next;
+        // }
+        // if (curr_ptr == metadata)
+        // {
+        //     if (prev_ptr)
+        //     {
+        //         prev_ptr->next = buddy;
+        //     }
+        //     else
+        //     {
+        //         arr[order].block_list = buddy;
+        //     }
+        //     buddy->prev = prev_ptr;
+        //     buddy->next = curr_ptr->next;
+        //     if (curr_ptr->next != NULL)
+        //     {
+        //         curr_ptr->next->prev = buddy;
+        //     }
+        //     curr_ptr->next = NULL; // Disconnect the current block from the list
+        // }
+
+        // metadata = buddy;
     }
 }
 
@@ -436,9 +441,16 @@ void *smalloc(size_t size)
     {
         return NULL;
     }
+    
+   
 
     // Check if the allocated block can be split
     MallocMetadata *metadata = get_metadata(allocatedBlock);
+
+    std::cout << "here" << std::endl;
+    std::cout << metadata->size << std::endl;
+    std::cout << "done" << std::endl;
+    
     splitBlockIfNeeded(metadata, size);
 
     // Return the address of the allocated block
@@ -523,4 +535,12 @@ void *srealloc(void *oldp, size_t size)
         // Return the new pointer.
         return newp;
     }
+}
+
+
+int main() {
+    // Write C++ code here
+    smalloc(40);
+
+    return 0;
 }

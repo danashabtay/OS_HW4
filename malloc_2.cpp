@@ -41,7 +41,7 @@ void *MMDBlockList::allocateBlock(size_t size)
     size_t allocation_size = size + META_SIZE;
     MallocMetadata *curr_block = block_list;
 
-    while (curr_block != NULL)
+    while (curr_block)
     {
         // check for a fitting block
         if (curr_block->is_free && size <= curr_block->size)
@@ -67,12 +67,12 @@ void *MMDBlockList::allocateBlock(size_t size)
     new_block->prev = NULL;
 
     // insert new block:
-    curr_block = block_list;
+    MallocMetadata *tail = block_list;
     MallocMetadata *prev_block = NULL;
-    while (curr_block)
+    while (tail)
     {
-        curr_block = curr_block->next;
-        prev_block = curr_block;
+        prev_block = tail;
+        tail = tail->next;
     }
     if (prev_block == NULL)
     {
@@ -192,10 +192,7 @@ void *smalloc(size_t size)
     {
         return NULL;
     }
-    else
-    {
-        return (char *)allocatedBlock + META_SIZE;
-    }
+    return (char *)allocatedBlock + META_SIZE;
 }
 
 void *scalloc(size_t num, size_t size)
@@ -219,12 +216,7 @@ void *scalloc(size_t num, size_t size)
 
 void sfree(void *p)
 {
-    MallocMetadata *metadata = blockList.get_metadata(p);
     if (p == NULL)
-    {
-        return;
-    }
-    if (metadata->is_free == true)
     {
         return;
     }
