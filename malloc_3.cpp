@@ -446,11 +446,6 @@ void *smalloc(size_t size)
 
     // Check if the allocated block can be split
     MallocMetadata *metadata = get_metadata(allocatedBlock);
-
-    std::cout << "here" << std::endl;
-    std::cout << metadata->size << std::endl;
-    std::cout << "done" << std::endl;
-    
     splitBlockIfNeeded(metadata, size);
 
     // Return the address of the allocated block
